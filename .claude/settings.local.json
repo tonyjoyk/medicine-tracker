@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /Users/tony/Documents/ | head -20)",
+      "Bash(npm install *)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//Users/tony/**)",
+      "Read(//usr/local/lib/**)",
+      "Bash(command -v node npm npx)",
+      "Bash(find /usr /opt /Users/tony -name \"node\" -type f 2>/dev/null | head -5)",
+      "Bash(ls /opt/homebrew/opt/node*/bin/node 2>/dev/null; ls ~/.volta/bin/node 2>/dev/null; ls ~/.fnm/node-versions/*/installation/bin/node 2>/dev/null; ls /usr/local/opt/node*/bin/node 2>/dev/null)"
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import { api } from '../lib/api'
 import MedicineList from './MedicineList'
 import HistoryList from './HistoryList'
 import MedicineModal from './MedicineModal'
@@ -15,30 +15,50 @@ export default function HomeScreen({ accountCode }) {
   const [editingMedicine, setEditingMedicine] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [error, setError] = useState('')
   const [userName, setUserName] = useState(() => localStorage.getItem(NAME_KEY) || 'My Medicines')
   const [userSubtitle, setUserSubtitle] = useState(() => localStorage.getItem(SUBTITLE_KEY) || '')
 
+  // Throws on failure; callers decide how to show the error.
   const fetchData = useCallback(async () => {
-    const [{ data: meds }, { data: snaps }] = await Promise.all([
-      supabase.from('medicines').select('*').eq('is_active', true).eq('account_code', accountCode).order('created_at', { ascending: true }),
-      supabase.from('snapshots').select('*').eq('account_code', accountCode).order('snapshot_date', { ascending: false }),
+    const [meds, snaps] = await Promise.all([
+      api.listMedicines(accountCode),
+      api.listSnapshots(accountCode),
     ])
-    setMedicines(meds || [])
-    setSnapshots(snaps || [])
-    setLoading(false)
-    return meds || []
+    setMedicines(meds)
+    setSnapshots(snaps)
+    return meds
   }, [accountCode])
 
   async function saveSnapshot(activeMeds) {
     const today = new Date().toISOString().split('T')[0]
     const payload = activeMeds.map(m => ({ name: m.name, dose_mg: m.dose_mg }))
-    await supabase.from('snapshots').upsert(
-      { snapshot_date: today, account_code: accountCode, medicines: payload },
-      { onConflict: 'snapshot_date,account_code' }
-    )
+    await api.saveSnapshot(accountCode, today, payload)
+    setSnapshots(await api.listSnapshots(accountCode))
   }
 
-  useEffect(() => { fetchData() }, [fetchData])
+  const loadAll = useCallback(async () => {
+    setLoading(true)
+    setLoadError('')
+    try {
+      const [, account] = await Promise.all([fetchData(), api.getAccount(accountCode)])
+      // The backend is the source of truth for name/Patient ID; localStorage is only a fallback.
+      if (account?.name) {
+        setUserName(account.name)
+        localStorage.setItem(NAME_KEY, account.name)
+      }
+      if (account?.subtitle != null) {
+        setUserSubtitle(account.subtitle)
+        localStorage.setItem(SUBTITLE_KEY, account.subtitle)
+      }
+    } catch (err) {
+      setLoadError(err.message)
+    }
+    setLoading(false)
+  }, [fetchData, accountCode])
+
+  useEffect(() => { loadAll() }, [loadAll])
 
   function openAdd() {
     setEditingMedicine(null)
@@ -51,28 +71,47 @@ export default function HomeScreen({ accountCode }) {
   }
 
   async function handleRemove(medicine) {
-    await supabase.from('medicines').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', medicine.id)
-    const meds = await fetchData()
-    await saveSnapshot(meds.filter(m => m.id !== medicine.id))
+    setError('')
+    try {
+      await api.removeMedicine(accountCode, medicine.id)
+      const meds = await fetchData()
+      await saveSnapshot(meds.filter(m => m.id !== medicine.id))
+    } catch (err) {
+      setError(`Couldn't remove ${medicine.name}. ${err.message}`)
+    }
   }
 
   async function handleSave(data, original) {
-    if (original) {
-      await supabase.from('medicines').update({
-        name: data.name,
-        dose_mg: data.dose_mg,
-        frequency: data.frequency,
-        updated_at: new Date().toISOString(),
-      }).eq('id', original.id)
-    } else {
-      await supabase.from('medicines').insert({ name: data.name, dose_mg: data.dose_mg, frequency: data.frequency, account_code: accountCode })
+    setError('')
+    const med = { name: data.name, dose_mg: data.dose_mg, frequency: data.frequency }
+    try {
+      if (original) {
+        await api.updateMedicine(accountCode, original.id, med)
+      } else {
+        await api.addMedicine(accountCode, med)
+      }
+    } catch (err) {
+      // Keep the modal open so nothing the user typed is lost.
+      setError(`Couldn't save ${data.name}. ${err.message}`)
+      return
     }
     setModalOpen(false)
-    const meds = await fetchData()
-    await saveSnapshot(meds)
+    try {
+      const meds = await fetchData()
+      await saveSnapshot(meds)
+    } catch (err) {
+      setError(`Saved, but couldn't refresh your list. ${err.message}`)
+    }
   }
 
-  function handleSaveSettings({ name, subtitle }) {
+  async function handleSaveSettings({ name, subtitle }) {
+    setError('')
+    try {
+      await api.updateAccount(accountCode, { name, subtitle })
+    } catch (err) {
+      setError(`Couldn't save settings. ${err.message}`)
+      return
+    }
     localStorage.setItem(NAME_KEY, name)
     localStorage.setItem(SUBTITLE_KEY, subtitle)
     setUserName(name)
@@ -88,8 +127,31 @@ export default function HomeScreen({ accountCode }) {
     )
   }
 
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 px-6 gap-6">
+        <p className="text-xl text-red-600 text-center">Couldn't load your medicines. {loadError}</p>
+        <button
+          onClick={loadAll}
+          className="bg-[#0C3966] text-white text-base font-semibold py-4 px-8 rounded tracking-widest"
+        >
+          TRY AGAIN
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-100">
+      {error && (
+        <div role="alert" className="fixed top-0 inset-x-0 z-[60] bg-red-600 text-white px-4 py-3">
+          <div className="max-w-md mx-auto flex items-start gap-3">
+            <p className="flex-1 text-base">{error}</p>
+            <button onClick={() => setError('')} aria-label="Dismiss" className="font-bold">✕</button>
+          </div>
+        </div>
+      )}
+
       {/* App bar */}
       <div className="bg-[#0C3966] text-white px-4 pt-10 pb-4">
         <div className="max-w-md mx-auto flex items-start justify-between">

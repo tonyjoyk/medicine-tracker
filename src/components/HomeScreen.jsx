@@ -42,7 +42,10 @@ export default function HomeScreen({ accountCode }) {
     setLoading(true)
     setLoadError('')
     try {
-      const [, account] = await Promise.all([fetchData(), api.getAccount(accountCode)])
+      const [, found] = await Promise.all([fetchData(), api.getAccount(accountCode)])
+      // A code saved in the browser may have no account in the database (e.g. from the old
+      // Supabase app). Create it so medicines can be saved against it.
+      const account = found || await api.createAccount(accountCode)
       // The backend is the source of truth for name/Patient ID; localStorage is only a fallback.
       if (account?.name) {
         setUserName(account.name)

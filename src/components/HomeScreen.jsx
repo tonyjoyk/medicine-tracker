@@ -86,9 +86,12 @@ export default function HomeScreen({ accountCode }) {
     const med = { name: data.name, dose_mg: data.dose_mg, frequency: data.frequency }
     try {
       if (original) {
-        await api.updateMedicine(accountCode, original.id, med)
+        const { medicine } = await api.updateMedicine(accountCode, original.id, med)
+        setMedicines(prev => prev.map(m => (m.id === medicine.id ? medicine : m)))
       } else {
-        await api.addMedicine(accountCode, med)
+        // Show the saved medicine right away instead of waiting for the full reload below.
+        const { medicine } = await api.addMedicine(accountCode, med)
+        setMedicines(prev => [...prev, medicine])
       }
     } catch (err) {
       // Keep the modal open so nothing the user typed is lost.

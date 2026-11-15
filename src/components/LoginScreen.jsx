@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { api } from '../lib/api'
 
 export default function LoginScreen({ onLogin }) {
   const [pin, setPin] = useState('')
@@ -13,21 +13,31 @@ export default function LoginScreen({ onLogin }) {
     setLoading(true)
     setError('')
 
-    const { data } = await supabase.from('accounts').select('code').eq('code', pin).maybeSingle()
-
-    setLoading(false)
-    if (data) {
-      onLogin(pin)
-    } else {
-      setScreen('confirm-create')
+    try {
+      const account = await api.getAccount(pin)
+      setLoading(false)
+      if (account) {
+        onLogin(pin)
+      } else {
+        setScreen('confirm-create')
+      }
+    } catch (err) {
+      setLoading(false)
+      setError(err.message)
     }
   }
 
   async function handleCreate() {
     setLoading(true)
-    await supabase.from('accounts').insert({ code: pin })
-    setLoading(false)
-    onLogin(pin)
+    setError('')
+    try {
+      await api.createAccount(pin)
+      setLoading(false)
+      onLogin(pin)
+    } catch (err) {
+      setLoading(false)
+      setError(err.message)
+    }
   }
 
   if (screen === 'confirm-create') {
@@ -38,6 +48,7 @@ export default function LoginScreen({ onLogin }) {
           No account found for <span className="font-semibold text-gray-800">{pin}</span>.{' '}
           Create a new account with this code?
         </p>
+        {error && <p className="text-center text-red-600 text-lg font-medium mb-4">{error}</p>}
         <div className="w-full max-w-xs flex flex-col gap-3">
           <button
             onClick={handleCreate}
@@ -47,7 +58,7 @@ export default function LoginScreen({ onLogin }) {
             {loading ? 'Creating…' : 'CREATE ACCOUNT'}
           </button>
           <button
-            onClick={() => { setScreen('enter'); setPin('') }}
+            onClick={() => { setScreen('enter'); setPin(''); setError('') }}
             className="w-full border-2 border-gray-300 text-gray-700 text-base font-semibold py-4 rounded tracking-widest"
           >
             GO BACK
